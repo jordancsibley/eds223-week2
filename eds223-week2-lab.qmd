@@ -1,0 +1,263 @@
+---
+title: "EDS 223 - Week 2 in-class coding"
+author: "Jordan Sibley"
+format: html
+---
+
+# Week 2 Lab
+
+### Intro to vector data with `sf` and coordinate reference systems
+
+Date: 2024-10-07
+
+```{r}
+rm(list =ls())
+# load in packages 
+library(sf)
+library(tidyverse)
+library(spData)
+library(tmap)
+```
+
+## Simple features in `sf`
+
+```{r}
+# create st_point with longitude and latitude for London
+# simple feature geometry
+london_point <- st_point(c(0.1, 51.5))
+
+# add coordinate reference system
+# simple feature collection 
+london_geom <- st_sfc(london_point, crs = 4326)
+
+# create data frame of attributes about London
+london_attrib <- data.frame(
+  name = "London",
+  temperature = 25, 
+  date = as.Date("2017-06-21")
+)
+
+# combine geometry and data frame
+# simple feature object
+london_sf <- st_sf(london_attrib, geometry = london_geom)
+```
+
+```{r}
+# things you might want to check in your workflow 
+class(london_sf) 
+
+# check coordinate reference system 
+st_crs(london_sf)
+
+
+```
+
+### Using existing `sf` object
+
+```{r}
+world <- spData::world
+
+# some summary analysis 
+class(world)
+
+# look at names of columns 
+names(world)
+
+summary(world)
+```
+
+The geometry column is “sticky”, meaning it will stick around unless we explicitly get rid of it. For example, `dplyr’s select()` function won’t get rid of it.
+
+```{r}
+# try turn it just into a dataframe 
+
+world_df <- world %>% 
+  select(-geom) # geom is still there 
+```
+
+To drop the geom column and convert this sf object into a data frame, we need to drop the geometry column using the `st_drop_geometry()`.
+
+```{r}
+world_df<- st_drop_geometry(world)
+
+class(world_df)
+```
+
+## Reprojecting data
+
+Whenever we work with multiple spatial data objects, we need to check that the CRSs match.
+
+```{r}
+london_proj <- data.frame(x = 53000, y = 180000) %>% 
+  st_as_sf(coords = c("x", "y"), crs = "EPSG:27700")
+
+
+# to check if the crs is the same
+# check with a condtional 
+st_crs(london_proj) == st_crs(london_sf) # FALSE
+```
+
+To transform the CRS of a dataset, we use the `st_transform()` function. In the crs argument, we need to specify the coordinate reference system. We can do this by either supplying a CRS code or specifying the CRS of another dataset using the `st_crs()` function.
+
+```{r}
+london_sf_transform = st_transform(london_sf, crs = st_crs(london_proj))
+
+# this will come up alot. Even if data changes at least they will always match
+```
+
+#### Make a self check
+
+```{r}
+if(st_crs(london_sf_transform) == st_crs(london_proj)) {
+  print("Coordinate reference systems of datasets match")
+} else {
+  warning("Coordinate reference systems do NOT match")
+}
+```
+
+### Changing map projections
+
+To display 3D data in 2D, we use projections. Which projection you use can have big implications for how you display information.
+
+To the projection of our data, we could:
+
+-   reproject the underlying data
+-   or in `tmap` we can specify the projection we want the map to use
+
+Equal Earth is an equal-area pseudocylindrical projection (EPSG 8857)
+
+```{r}
+# equal earth projection 
+tm_shape(world, projection = 8857) +
+  tm_fill(col = "area_km2")
+```
+
+Mercator is a conformal cylindrical map that preserves angles (EPSG 3395)
+
+```{r}
+# mercator projection  
+tm_shape(world, projection = 3395) +
+  tm_fill(col = "area_km2")
+```
+
+## Vector attribute subsetting
+
+#### `dplyr` functions
+
+```{r}
+# select certain columns 
+world %>% 
+  select(name_long, pop)
+
+# exclude columns
+world %>% 
+  select(-subregion)
+
+# select columns and rename 
+world %>% 
+  select(name = name_long, population = pop)
+```
+
+```{r}
+# filtering countries under a certain size 
+world1 <- world %>% 
+  filter(area_km2 < 10000)
+```
+
+#### Chaining commands with pipes
+
+```{r}
+# can chain multiple functions together just as in a df 
+world %>% 
+  filter(continent == "Asia") %>% 
+  select(name_long, continent, lifeExp) %>% 
+  slice_max(lifeExp) %>% # pick the row with the highest value in this column
+  st_drop_geometry()
+```
+
+#### Vector attribute aggregation
+
+```{r}
+world %>%
+  group_by(continent) %>%
+  summarize(population = sum(pop, na.rm = TRUE)) %>%
+  st_drop_geometry()
+```
+
+Took the population of each continent and added them up
+
+## Joins with vector atttributes
+
+Coffee production of 46 countries in the years 2016 and 2017
+
+```{r}
+# read in data 
+coffee_data <- spData::coffee_data
+```
+
+```{r}
+nrow(coffee_data)
+nrow(world)
+```
+This shows that the coffee data does not include all the countries 
+
+Lets combine these datasets 
+```{r}
+world_coffee <- left_join(world, coffee_data, by = "name_long")
+
+names(world_coffee)
+```
+
+Now let's see what this data looks like on a map 
+```{r}
+tm_shape(world_coffee) +
+  tm_fill(col = "coffee_production_2016")
+```
+
+
+If we just wanted to keep countries that do have coffee data, we could use an inner join:
+```{r}
+world_coffee_inner <- inner_join(world, coffee_data, by = "name_long")
+
+# to check that we don't lose data if the names are an exact match
+if (nrow(world_coffee_inner) < nrow(coffee_data)) {
+  warning("inner join does not match orginial data. potential data loss during join")
+}
+```
+
+
+We can find rows that didn’t match using the `setdiff()` function.
+```{r}
+setdiff(coffee_data$name_long, world$name_long)
+```
+
+```{r}
+# updating the domican republic of the congos name so that it matches 
+drc <- stringr::str_subset(world$name_long, "Dem*.+Congo")
+
+coffee_data$name_long[stringr::str_detect(coffee_data$name_long, "Congo")] <- drc
+
+# run check again 
+if (nrow(world_coffee_inner) < nrow(coffee_data)) {
+  warning("inner join does not match orginial data. potential data loss during join")
+}
+```
+Still not an exact match, we could build out the warning message in a more complex way to figure it out, but that is for another day 
+
+
+```{r}
+# create map 
+tm_shape(world_coffee_inner) +
+  tm_polygons(fill = "coffee_production_2016",
+              title = "Coffee Production 2016") +
+  tm_layout(legend.outside = TRUE)
+```
+
+
+What happens if we left join a sf object onto a data frame?
+```{r}
+coffee_world <- left_join(coffee_data, world, by = "name_long")
+class(coffee_world)
+```
+
+
