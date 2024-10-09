@@ -1,0 +1,86 @@
+---
+title: "EDS 223 Week 2 Discussion Section"
+subtitle: "Working with multiple vector types"
+author: "Jordan Sibley"
+format: html
+---
+
+### Notes about Homework 2
+
+Due Saturday Oct 19th
+
+-   Professional output
+-   Unit tests and good comments
+-   No warnings or messages
+
+# Getting Started 
+
+### The data 
+
+
+### Set Up 
+```{r}
+# load libraries 
+library(here)
+library(tidyverse)
+library(sf)
+library(tmap)
+```
+
+```{r}
+# read in data 
+col_eco <- st_read(here("week2_discussion_data", "Colombia", "Colombia.shp"))
+roads <-st_read(here("week2_discussion_data", "RDLINE_colombia", "RDLINE_colombia.shp"))
+birds <- read_csv(here("week2_discussion_data", "dataves.csv")) %>% 
+  as_tibble() %>% 
+  rename(long = decimal_longitude) %>% 
+  rename(lat = decimal_latitude)
+```
+
+```{r}
+birds <- birds %>% 
+  st_as_sf(coords = c("long", "lat"), crs = 4326)
+```
+
+Check the class of `birds`
+```{r}
+class(birds)
+# class = sf, tbl_df, data.frame
+```
+
+Check the geometry types 
+```{r}
+unique(st_geometry_type(col_eco))  
+# MULTIPOLYGON
+
+unique(st_geometry_type(roads))
+# Linestring 
+```
+
+```{r}
+# Andean region of Colombia 
+col_andean <- col_eco %>% 
+  mutate(N1_MacroBi = as.factor(N1_MacroBi)) %>% 
+  filter(N1_MacroBi == "Andean")
+```
+
+```{r}
+tm_shape(col_andean) +
+  tm_polygons() +
+  tm_layout(main.title = "Andean Region of Colombia")
+```
+
+## How to check CRS 
+```{r}
+st_crs(col_eco)
+
+# to check the units 
+st_crs(col_eco)$units
+```
+
+## Check if CRS matches 
+```{r}
+st_crs(col_eco) == st_crs(roads) 
+# If they are the same, you can plot them together 
+```
+
